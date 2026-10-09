@@ -1,0 +1,96 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Portfolio lab - bastion, private PHP and LAMP servers, Windows and public ALB.
+# Deploy vpc.yaml first. Use its VpcId, Public1Id, Public2Id and Private1Id outputs.
+# Public subnets must be in different AZs and have an internet-gateway route.
+# Private subnet needs a working NAT route for apt package installation.
+# Verify all mapping values exist in the specified AWS account and region.
+# These are the eu-west-1 sandbox IDs from your supplied file, not your earlier personal VPC.
+# HTTPS requires the mapped ACM certificate and public Route 53 hosted zone.
+# Certificate must cover both hostnames and be in the ALB region.
+# Use a sanitized copy with placeholders when publishing internship material.
+Mappings:
+  '485300---':
+    eu-west-1:
+      vpc: vpc-07a2b8--------
+      Public1: subnet-027145a7--------
+      Public2: subnet-044b049be--------
+      Private1: subnet-0e6d45cbb56------
+      ami: ami-04df7d76c1b804451
+      windowami: ami-01a5cf4a00c7d0f3b
+      keyname: devops-san----
+      instanceType: t3.small
+      # Replace with your public IPv4 address followed by /32 before deployment.
+      # This loopback placeholder prevents remote SSH access until changed.
+      AdminCidr: 127.0.0.1/32
+      SSLCert: arn:aws:acm:eu-west-1:485300051832:certificate/75a1707f-b9c5-43a2-b------
+      HostedZoneIDPublic: Z09206652FQ53------
+      PHPHostname: phpweb.sandbox.argusm--.tech
+      LAMPHostname: lampweb.sandbox.argusm----.tech
+Resources:
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SSH from administrator only.
+      VpcId: !FindInMap [!Ref AWS::AccountId, !Ref AWS::Region, vpc]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !FindInMap [!Ref AWS::AccountId, !Ref AWS::Region, AdminCidr]
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTP and HTTPS.
+      VpcId: !FindInMap [!Ref AWS::AccountId, !Ref AWS::Region, vpc]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTP from ALB and SSH from bastion only.
+      VpcId: !FindInMap [!Ref AWS::AccountId, !Ref AWS::Region, vpc]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref BastionSecurityGroup
+  WindowsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDP through bastion only.
+      VpcId: !FindInMap [!Ref AWS::AccountId, !Ref AWS::Region, vpc]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          SourceSecurityGroupId: !Ref BastionSecurityGroup
+  BastionHostInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !FindInMap [!Ref AWS::AccountId, !Ref AWS::Region, ami]
+      InstanceType: !FindInMap [!Ref AWS::AccountId, !Ref AWS::Region, instanceType]
+      KeyName: !FindInMap [!Ref AWS::AccountId, !Ref AWS::Region, keyname]
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          AssociatePublicIpAddress: true
+          SubnetId: !FindInMap [!Ref AWS::AccountId, !Ref AWS::Region, Public1]
+          GroupSet: [!Ref BastionSecurityGroup]
+      MetadataOptions:
+        HttpTokens: required
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 16
+            VolumeType: gp3
+            Encrypted: true
